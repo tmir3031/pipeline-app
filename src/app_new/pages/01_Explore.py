@@ -1,35 +1,53 @@
 from __future__ import annotations
-import os, json
+import os, json, shutil
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import streamlit as st
 import pydeck as pdk
 from matplotlib import colormaps as mpl_cmaps
+
 from data_loader import load_parquet_from_folder, list_drive_files
 
-# ---------- CONFIG ----------
+# ============== CONFIG ==============
 GEO_DIR = "data/geo"
 MAP_STYLE = "https://basemaps.cartocdn.com/gl/positron-gl-style/style.json"
-DEFAULT_VIEW = (44.437, 26.097)     # fallback (Bucharest) if nothing else is found
+DEFAULT_VIEW = (44.437, 26.097)     # fallback if nothing else is found (Bucharest)
 MAP_HEIGHT = 720
 
-CMAP_NAME = "cividis"                # perceptually-uniform, colour-blind friendly
+CMAP_NAME = "cividis"                # perceptually uniform, colour-blind friendly
 SCALING_MODE = "robust"              # 'robust' (p5–p95) or 'minmax'
 INCLUDE_ZERO = False                 # hide zero-value cells by default
-# -----------------------------------
+# ====================================
 
+# ---------- PAGE ----------
 st.set_page_config(page_title="Explore", layout="wide")
 st.title("Explore — mobility on H3")
 
-# ---------- HELPERS ----------
-_drive_files = set(os.path.basename(p) for p in list_drive_files())
-def has_drive(name: str) -> bool:
-    return name in _drive_files
+# ---------- DRIVE FINGERPRINT & MAINTENANCE ----------
+ALL_DRIVE_FILES = list_drive_files()  # cached inside data_loader
+FILES_SIG = hash(tuple(sorted(f.lower() for f in ALL_DRIVE_FILES)))
+
+m1, m2 = st.sidebar.columns(2)
+if m1.button("🔄 Clear cache"):
+    st.cache_data.clear()
+    st.rerun()
+if m2.button("🧹 Redownload (.cache)"):
+    shutil.rmtree(".cache", ignore_errors=True)
+    st.cache_data.clear()
+    st.rerun()
+
+# For presence checks by *basename* (robust to subfolders inside Drive)
+_DRIVE_BASENAMES = set(os.path.basename(p) for p in ALL_DRIVE_FILES)
+def has_drive(basename: str) -> bool:
+    return basename in _DRIVE_BASENAMES
 
 def file_if_exists(path: str) -> str | None:
     return path if os.path.exists(path) else None
 
-@st.cache_data
+# ---------- HELPERS ----------
+@st.cache_data(show_spinner=True)
 def initial_view_from_boundary() -> tuple[float, float] | None:
     """Approximate centre from dataset boundary; None if not available."""
     path = os.path.join(GEO_DIR, "h3_frontier.geojson")
@@ -52,13 +70,19 @@ def initial_view_from_boundary() -> tuple[float, float] | None:
         pass
     return None
 
-@st.cache_data
-def load_df_from_drive(filename: str, value_col: str) -> pd.DataFrame:
-    """Returnează DF normalizat dintr-un fișier Parquet din Drive."""
-    df = load_parquet_from_folder(filename)
+@st.cache_data(show_spinner=True)
+def load_df_from_drive(files_sig: int, filename: str, value_col: str) -> pd.DataFrame:
+    """
+    Load a Parquet from Drive and normalise columns to: h3_cell, hour, value, [daytype].
+
+    files_sig is only used to invalidate cache when Drive listing changes.
+    """
+    _ = files_sig                       # participate in cache key
+    df = load_parquet_from_folder(filename)  # suffix or exact path allowed
+    # normalise common columns
     ren = {}
     for c in df.columns:
-        lc = c.lower()
+        lc = str(c).lower()
         if lc == "h3_cell": ren[c] = "h3_cell"
         if lc == "hour":    ren[c] = "hour"
         if lc == "daytype": ren[c] = "daytype"
@@ -68,24 +92,37 @@ def load_df_from_drive(filename: str, value_col: str) -> pd.DataFrame:
         raise ValueError(f"'{value_col}' not found in {filename}. Columns: {list(df.columns)}")
 
     out = df[["h3_cell", "hour", value_col]].copy().rename(columns={value_col: "value"})
+    # force types
+    out["h3_cell"] = out["h3_cell"].astype(str)
+    out["hour"] = pd.to_numeric(out["hour"], errors="coerce").astype("Int64")
+    out["value"] = pd.to_numeric(out["value"], errors="coerce")
+
     if "daytype" in df.columns:
         out["daytype"] = df["daytype"].astype(str)
     return out
 
-@st.cache_data
-def load_users_daytype_from_daily_drive() -> pd.DataFrame | None:
-    """Construiește weekday/weekend din fișierul zilnic (Drive)."""
+@st.cache_data(show_spinner=True)
+def load_users_daytype_from_daily_drive(files_sig: int) -> pd.DataFrame | None:
+    """
+    Build weekday/weekend means from a daily file in Drive.
+    Expects columns: h3_cell, hour, n_users, date_utc
+    """
+    _ = files_sig
     if not has_drive("h3_day_hour_users.parquet"):
         return None
-    df = load_parquet_from_folder("h3_day_hour_users.parquet").rename(
-        columns={"h3_cell":"h3_cell","hour":"hour","n_users":"n_users"}
-    )
-    df["date_utc"] = pd.to_datetime(df["date_utc"], utc=True)
+    df = load_parquet_from_folder("h3_day_hour_users.parquet")
+    df = df.rename(columns={"h3_cell": "h3_cell", "hour": "hour", "n_users": "n_users"})
+    # types
+    df["h3_cell"] = df["h3_cell"].astype(str)
+    df["hour"] = pd.to_numeric(df["hour"], errors="coerce").astype("Int64")
+    df["n_users"] = pd.to_numeric(df["n_users"], errors="coerce")
+    df["date_utc"] = pd.to_datetime(df["date_utc"], utc=True, errors="coerce")
+
     dow = df["date_utc"].dt.dayofweek
     df["daytype"] = np.where(dow >= 5, "weekend", "weekday")
-    g = df.groupby(["h3_cell","hour","daytype"], as_index=False)["n_users"].mean()
-    return g.rename(columns={"n_users":"value"})
-
+    g = df.groupby(["h3_cell", "hour", "daytype"], as_index=False, observed=True)["n_users"].mean()
+    g = g.rename(columns={"n_users": "value"})
+    return g
 
 # Auto-centre on H3 (supports h3 v3 & v4)
 def view_from_h3_cells(cells: list[str], sample: int = 6000):
@@ -100,9 +137,9 @@ def view_from_h3_cells(cells: list[str], sample: int = 6000):
         rng = np.random.default_rng(0)
         cells = rng.choice(cells, size=sample, replace=False).tolist()
 
-    if hasattr(h3, "h3_to_geo"):       # v3
+    if hasattr(h3, "h3_to_geo"):          # v3
         to_latlng = h3.h3_to_geo
-    elif hasattr(h3, "cell_to_latlng"):  # v4
+    elif hasattr(h3, "cell_to_latlng"):   # v4
         to_latlng = h3.cell_to_latlng
     else:
         return None
@@ -139,12 +176,12 @@ def colour_with_cmap(df: pd.DataFrame, value_col="value",
         df["_colour"] = []
         return df, (np.nan, np.nan)
 
-    v = df[value_col].to_numpy(dtype="float64")
+    v = pd.to_numeric(df[value_col], errors="coerce").to_numpy(dtype="float64")
     valid = np.isfinite(v) & ((v > 0) | include_zero)
     vref = v[valid]
 
     if vref.size == 0:
-        df["_colour"] = [[200,200,200,0]] * len(df)
+        df["_colour"] = [[200, 200, 200, 0]] * len(df)
         return df, (np.nan, np.nan)
 
     if scaling == "robust":
@@ -165,6 +202,7 @@ def colour_with_cmap(df: pd.DataFrame, value_col="value",
     else:
         rgba[(v <= 0) | ~np.isfinite(v), 3] = 60
 
+    df = df.copy()
     df["_colour"] = rgba.tolist()
     return df, (float(vmin), float(vmax))
 
@@ -187,8 +225,6 @@ def add_geojson_layer(layers: list, filename: str, stroke=True, fill=False, line
                                 get_line_color=line_rgba, line_width_min_pixels=width))
     except Exception as e:
         st.warning(f"Cannot load {filename}: {e}")
-
-# -----------------------------------
 
 # ---------- DATA SOURCES ----------
 metrics = []
@@ -213,8 +249,8 @@ metric_label = st.sidebar.selectbox("Metric", [m[0] for m in metrics], index=0)
 _metric_def = {
     "Users (all days)":
         "Number of distinct users **present** in the H3 cell during the selected hour, "
-        "aggregated over the whole dataset period (presence is determined upstream by a dwell-time threshold). "
-        "Good proxy for footfall/attendance.",
+        "aggregated over the whole dataset period (presence determined upstream by a dwell-time threshold). "
+        "A proxy for footfall/attendance.",
 
     "Users (weekday/weekend)":
         "Same as *Users (all days)*, but averaged **separately** over days by day type. "
@@ -226,39 +262,40 @@ _metric_def = {
 
     "Median dwell (sec)":
         "Median (50th percentile) **per-user dwell time** in seconds for that cell and hour. "
-        "More robust than the mean; higher values mean people typically stay longer.",
+        "More robust than the mean; higher values imply longer typical stays.",
 
     "KDE in cell (traffic proxy)":
-        "**Unitless intensity** from a kernel density estimate of the raw points, projected onto the H3 grid. "
-        "Useful as a proxy for movement/throughput; comparable **within the current selection**, not across different ones."
+        "**Unitless intensity** from a kernel density estimate of raw points, projected onto the H3 grid. "
+        "Useful as a proxy for movement/throughput; comparable **within the current selection**."
 }
-
 st.sidebar.caption("What this metric means")
 st.sidebar.info(_metric_def.get(metric_label, ""))
 
-metric_file, metric_value_col, metric_has_daytype = [(m[1], m[2], m[3]) for m in metrics if m[0] == metric_label][0]
-hour = st.sidebar.slider("Hour (UTC)", 0, 23, 8)
+metric_file, metric_value_col, metric_has_daytype = [
+    (m[1], m[2], m[3]) for m in metrics if m[0] == metric_label
+][0]
 
+hour = st.sidebar.slider("Hour (UTC)", 0, 23, 0)
 show_frontier = st.sidebar.checkbox("Boundary (GeoJSON)", True)
 show_grid     = st.sidebar.checkbox("H3 grid (if available)", False)
-
 show_hotspots = st.sidebar.checkbox("Highlight hotspots (≥ P95)", False)
 
 # ---------- LOAD + FILTER ----------
 if metric_file == "h3_day_hour_users.parquet":
-    df = load_users_daytype_from_daily_drive()
+    df = load_users_daytype_from_daily_drive(FILES_SIG)
 else:
-    df = load_df_from_drive(metric_file, metric_value_col)
-
+    df = load_df_from_drive(FILES_SIG, metric_file, metric_value_col)
 
 # optional robustness: clip negatives for non-negative metrics
-if metric_value_col in ("n_users", "person_minutes", "dwell_median_s", "kde_in_cell") or metric_file == "h3_day_hour_users.parquet":
-    df["value"] = df["value"].clip(lower=0)
+if metric_value_col in ("n_users", "person_minutes", "dwell_median_s", "kde_in_cell") \
+   or metric_file == "h3_day_hour_users.parquet":
+    df["value"] = pd.to_numeric(df["value"], errors="coerce").clip(lower=0)
 
+# filter by hour and optional day type
 df = df[df["hour"] == hour].copy()
 
 if "daytype" in df.columns:
-    day_opts = sorted(df["daytype"].unique().tolist())
+    day_opts = sorted(df["daytype"].dropna().unique().tolist())
     daytype = st.sidebar.radio("Day type", day_opts, index=0, horizontal=True)
     df = df[df["daytype"] == daytype].copy()
 
@@ -307,7 +344,6 @@ if show_hotspots:
             extruded=False,
             pickable=False
         ))
-
 
 if show_frontier:
     add_geojson_layer(layers, "h3_frontier.geojson", stroke=True, fill=False, line_rgba=[0,0,0,220], width=2)
@@ -386,11 +422,12 @@ st.caption(
     "Values ≳ 3 usually indicate strong concentration of activity."
 )
 
+# ---------- TOP CELLS ----------
 st.subheader("Top 15 cells (current filter)")
 cols = ["h3_cell","value","hour"] + (["daytype"] if "daytype" in df.columns else [])
 st.dataframe(df.sort_values("value", ascending=False).head(15)[cols], use_container_width=True)
 
-# -------- Columns explained (dynamic 'value' meaning) --------
+# ---------- COLUMN EXPLANATIONS ----------
 value_expl = {
     "n_users": (
         "Number of distinct users **present** in the cell during the hour. "
@@ -398,18 +435,17 @@ value_expl = {
     ),
     "person_minutes": (
         "Total dwell time accumulated by all users in the cell during the hour, measured in **person-minutes**. "
-        "Example: 10 people staying 3 minutes each ⇒ 30 person-minutes."
+        "Example: 10 people × 3 minutes each ⇒ 30 person-minutes."
     ),
     "dwell_median_s": (
         "Per-cell **median** dwell time per user during the hour, in **seconds** "
         "(less sensitive to outliers than the mean)."
     ),
     "kde_in_cell": (
-        "Kernel Density Estimate (KDE) intensity projected on the H3 cell — a proxy for flow/traffic through that area. "
+        "Kernel Density Estimate (KDE) intensity projected onto the H3 cell — a proxy for flow/traffic through that area. "
         "Higher values indicate stronger concentration of trajectories."
     ),
 }
-# special case: daily file aggregated to weekday/weekend
 if metric_file == "h3_day_hour_users.parquet":
     value_text = ("Mean **n_users** across days for the chosen day type "
                   "(*weekday*/*weekend*) and hour (UTC). Presence uses the upstream threshold.")
@@ -435,9 +471,10 @@ st.download_button(
     mime="text/csv"
 )
 
+# ---------- METHODOLOGY ----------
 with st.expander("Methodology & interpretation"):
     st.markdown(
-        f"""
+        """
 **H3 grid.** The study area is partitioned into fixed-resolution hexagonal cells; values are aggregated per hour and cell.
 
 **Metrics:**
