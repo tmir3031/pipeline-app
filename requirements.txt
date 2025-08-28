@@ -1,0 +1,17 @@
+pandas
+pyarrow
+geopandas
+shapely
+pyproj
+scikit-learn
+h3
+folium
+tqdm
+alphashape
+matplotlib
+contextily
+pyyaml
+loguru
+streamlit
+pydeck
+gdown
