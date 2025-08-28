@@ -30,6 +30,16 @@ with left:
     )
 st.markdown("---")
 
+if st.sidebar.button("🔁 Force redownload data"):
+    import os, shutil, re
+    url = st.secrets["drive"]["folder_url"]
+    m = re.search(r"/folders/([a-zA-Z0-9_-]+)", url)
+    folder_id = m.group(1) if m else url
+    shutil.rmtree(os.path.join(".cache", "drive", folder_id), ignore_errors=True)
+    st.cache_data.clear()
+    st.rerun()
+
+
 # ---------------------------------------------------------------------
 # SCOPE & CONTRIBUTIONS
 # ---------------------------------------------------------------------
