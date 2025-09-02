@@ -28,7 +28,7 @@ C_BOUND  = [0, 0, 0, 220]        # dataset boundary (GeoJSON outline)
 # PAGE SETUP
 # =========================
 st.set_page_config(page_title="Evaluation", layout="wide")
-st.title("Evaluation — do the ranked candidates hit the true hotspots?")
+st.title("Evaluation")
 
 
 # ==========================================================
@@ -221,36 +221,36 @@ def build_relevance_from_points(
 # =========================
 # METRICS UTILITIES
 # =========================
-def precision_recall_f1_at_k(pred: list[str], rel: set[str], k: int) -> tuple[float, float, float]:
-    """Precision@k, Recall@k, and F1@k for a ranked list `pred` against a relevance set `rel`."""
-    if k <= 0 or not pred:
-        return 0.0, 0.0, 0.0
-    k = min(k, len(pred))
-    topk = pred[:k]
-    hits = sum(1 for c in topk if c in rel)
-    p = hits / float(k)
-    r = (hits / float(len(rel))) if rel else 0.0
-    f1 = (2 * p * r / (p + r)) if (p + r) else 0.0
-    return float(p), float(r), float(f1)
-
-def average_precision(pred: list[str], rel: set[str]) -> float:
-    """Average Precision (AP): position-sensitive precision averaged over relevant items."""
-    if not rel:
-        return 0.0
-    score, hits = 0.0, 0
-    for i, c in enumerate(pred, start=1):
-        if c in rel:
-            hits += 1
-            score += hits / float(i)
-    return float(score / len(rel))
-
-def jaccard(a: set[str], b: set[str]) -> float:
-    """Jaccard similarity between two sets."""
-    if not a and not b:
-        return 1.0
-    if not a or not b:
-        return 0.0
-    return float(len(a & b) / len(a | b))
+# def precision_recall_f1_at_k(pred: list[str], rel: set[str], k: int) -> tuple[float, float, float]:
+#     """Precision@k, Recall@k, and F1@k for a ranked list `pred` against a relevance set `rel`."""
+#     if k <= 0 or not pred:
+#         return 0.0, 0.0, 0.0
+#     k = min(k, len(pred))
+#     topk = pred[:k]
+#     hits = sum(1 for c in topk if c in rel)
+#     p = hits / float(k)
+#     r = (hits / float(len(rel))) if rel else 0.0
+#     f1 = (2 * p * r / (p + r)) if (p + r) else 0.0
+#     return float(p), float(r), float(f1)
+#
+# def average_precision(pred: list[str], rel: set[str]) -> float:
+#     """Average Precision (AP): position-sensitive precision averaged over relevant items."""
+#     if not rel:
+#         return 0.0
+#     score, hits = 0.0, 0
+#     for i, c in enumerate(pred, start=1):
+#         if c in rel:
+#             hits += 1
+#             score += hits / float(i)
+#     return float(score / len(rel))
+#
+# def jaccard(a: set[str], b: set[str]) -> float:
+#     """Jaccard similarity between two sets."""
+#     if not a and not b:
+#         return 1.0
+#     if not a or not b:
+#         return 0.0
+#     return float(len(a & b) / len(a | b))
 
 
 # =========================
@@ -259,27 +259,34 @@ def jaccard(a: set[str], b: set[str]) -> float:
 st.sidebar.header("Configuration")
 heldout_mode = st.sidebar.radio(
     "Relevance construction",
-    ("Held-out from raw points", "From aggregate users (fallback)"),
+    ("Held-out from raw points"),
     index=0,
-    help="Prefer held-out from raw points; fallback uses top p% of hourly mean n_users."
+    help="Prefer held-out from raw points"
 )
 
-presence_threshold_s = st.sidebar.number_input(
-    "Presence threshold (sec)", min_value=60, max_value=3600, step=30, value=300,
-    help="Seconds to mark a user's presence in a cell/hour (must match upstream pipeline)."
-)
-test_days_frac = st.sidebar.slider(
-    "Hold-out fraction of days", min_value=0.10, max_value=0.50, step=0.05, value=0.30,
-    help="Proportion of days used as the test split."
-)
-top_p = st.sidebar.slider(
-    "Relevance size per hour (top p%)", min_value=3, max_value=15, step=1, value=12,
-    help="Size of the hourly relevance set R_h, as a percentage."
-) / 100.0
-seed = st.sidebar.number_input("Random seed", min_value=0, max_value=10_000, step=1, value=13)
+# presence_threshold_s = st.sidebar.number_input(
+#     "Presence threshold (sec)", min_value=60, max_value=3600, step=30, value=300,
+#     help="Seconds to mark a user's presence in a cell/hour (must match upstream pipeline)."
+# )
+# test_days_frac = st.sidebar.slider(
+#     "Hold-out fraction of days", min_value=0.10, max_value=0.50, step=0.05, value=0.30,
+#     help="Proportion of days used as the test split."
+# )
+# top_p = st.sidebar.slider(
+#     "Relevance size per hour (top p%)", min_value=3, max_value=15, step=1, value=12,
+#     help="Size of the hourly relevance set R_h, as a percentage."
+# ) / 100.0
+# seed = st.sidebar.number_input("Random seed", min_value=0, max_value=10_000, step=1, value=13)
 
-k_eval = st.sidebar.slider("k for P@k / R@k / F1@k", min_value=10, max_value=100, step=5, value=25)
-k_stab = st.sidebar.slider("k for stability (Jaccard)", min_value=10, max_value=100, step=5, value=25)
+# k_eval = st.sidebar.slider("k for P@k / R@k / F1@k", min_value=10, max_value=100, step=5, value=25)
+# k_stab = st.sidebar.slider("k for stability (Jaccard)", min_value=10, max_value=100, step=5, value=25)
+
+# --- fixed values ---
+presence_threshold_s = 300
+test_days_frac       = 0.30
+top_p                = 0.10
+seed                 = 13
+
 
 st.sidebar.subheader("Visual inspection (per-hour)")
 hour_to_plot = st.sidebar.selectbox("Pick an hour to inspect", list(range(24)), index=0)
@@ -319,107 +326,107 @@ else:
 # =========================
 # EVALUATION METRICS
 # =========================
-rows, APs = [], []
-for h in range(24):
-    pred = cands.get(h, pd.DataFrame())
-    pred_list = pred["h3_cell"].astype(str).tolist() if not pred.empty else []
-    rel_set = R.get(h, set())
-
-    P, Rk, F1 = precision_recall_f1_at_k(pred_list, rel_set, k_eval)
-    AP = average_precision(pred_list, rel_set)
-    APs.append(AP)
-
-    # Temporal stability: mean Jaccard across consecutive test days (top-k sets)
-    jacc = np.nan
-    dd = daily_top.get(h, {})
-    if dd:
-        dates = sorted(dd.keys())
-        if len(dates) >= 2:
-            vals = []
-            for d1, d2 in zip(dates[:-1], dates[1:]):
-                s1 = set(dd[d1][:k_stab]); s2 = set(dd[d2][:k_stab])
-                vals.append(jaccard(s1, s2))
-            if vals:
-                jacc = float(np.mean(vals))
-
-    rows.append({
-        "hour": h,
-        "P@k": P,
-        "R@k": Rk,
-        "F1@k": F1,
-        "AP": AP,
-        "Jaccard_stability": (float(jacc) if not np.isnan(jacc) else None),
-        "k_eval": k_eval,
-        "|R_h|": len(rel_set),
-        "candidates": len(pred_list),
-        "max_recall_if_k": (min(k_eval, len(rel_set)) / len(rel_set) if len(rel_set) else 0.0),
-    })
-
-per_hour = pd.DataFrame(rows).sort_values("hour")
-MAP = float(np.mean(APs)) if APs else 0.0
+# rows, APs = [], []
+# for h in range(24):
+#     pred = cands.get(h, pd.DataFrame())
+#     pred_list = pred["h3_cell"].astype(str).tolist() if not pred.empty else []
+#     rel_set = R.get(h, set())
+#
+#     P, Rk, F1 = precision_recall_f1_at_k(pred_list, rel_set, k_eval)
+#     AP = average_precision(pred_list, rel_set)
+#     APs.append(AP)
+#
+#     # Temporal stability: mean Jaccard across consecutive test days (top-k sets)
+#     jacc = np.nan
+#     dd = daily_top.get(h, {})
+#     if dd:
+#         dates = sorted(dd.keys())
+#         if len(dates) >= 2:
+#             vals = []
+#             for d1, d2 in zip(dates[:-1], dates[1:]):
+#                 s1 = set(dd[d1][:k_stab]); s2 = set(dd[d2][:k_stab])
+#                 vals.append(jaccard(s1, s2))
+#             if vals:
+#                 jacc = float(np.mean(vals))
+#
+#     rows.append({
+#         "hour": h,
+#         "P@k": P,
+#         "R@k": Rk,
+#         "F1@k": F1,
+#         "AP": AP,
+#         "Jaccard_stability": (float(jacc) if not np.isnan(jacc) else None),
+#         "k_eval": k_eval,
+#         "|R_h|": len(rel_set),
+#         "candidates": len(pred_list),
+#         "max_recall_if_k": (min(k_eval, len(rel_set)) / len(rel_set) if len(rel_set) else 0.0),
+#     })
+#
+# per_hour = pd.DataFrame(rows).sort_values("hour")
+# MAP = float(np.mean(APs)) if APs else 0.0
 
 
 # =========================
 # KPIs + CONFIG SNAPSHOT
 # =========================
-kpi1, kpi2, kpi3, kpi4 = st.columns(4)
-kpi1.metric("MAP", f"{MAP:.3f}")
-kpi2.metric("P@k (mean)", f"{per_hour['P@k'].mean():.3f}")
-kpi3.metric("R@k (mean)", f"{per_hour['R@k'].mean():.3f}")
-kpi4.metric("F1@k (mean)", f"{per_hour['F1@k'].mean():.3f}")
-
-cfg_box = {
-    "heldout_mode": ("from_points" if heldout_mode.startswith("Held") else "from_users_file"),
-    "presence_threshold_s": int(presence_threshold_s),
-    "test_days_frac": float(test_days_frac),
-    "heldout_top_p": float(top_p),
-    "random_seed": int(seed),
-    "k_eval": int(k_eval),
-    "stability_k": int(k_stab),
-    "hour_inspected": int(hour_to_plot),
-    "map_top_k": int(k_map),
-    "show_boundary": bool(show_boundary),
-}
-with st.expander("Run configuration (snapshot) — reproducibility"):
-    st.json(cfg_box)
-    st.download_button(
-        "Download config snapshot (JSON)",
-        data=json.dumps(cfg_box, indent=2).encode("utf-8"),
-        file_name="evaluation_run_config.json",
-        mime="application/json"
-    )
-    st.code(
-        "eval:\n"
-        f"  heldout_mode: {cfg_box['heldout_mode']}\n"
-        f"  presence_threshold_s: {cfg_box['presence_threshold_s']}\n"
-        f"  test_days_frac: {cfg_box['test_days_frac']}\n"
-        f"  heldout_top_p: {cfg_box['heldout_top_p']}\n"
-        f"  random_seed: {cfg_box['random_seed']}\n"
-        f"  k: {cfg_box['k_eval']}\n"
-        f"  stability_k: {cfg_box['stability_k']}\n",
-        language="yaml",
-    )
-
-st.caption("Temporal stability (held-out only): mean Jaccard of top-k across consecutive test days. Higher is better.")
+# kpi1, kpi2, kpi3, kpi4 = st.columns(4)
+# kpi1.metric("MAP", f"{MAP:.3f}")
+# kpi2.metric("P@k (mean)", f"{per_hour['P@k'].mean():.3f}")
+# kpi3.metric("R@k (mean)", f"{per_hour['R@k'].mean():.3f}")
+# kpi4.metric("F1@k (mean)", f"{per_hour['F1@k'].mean():.3f}")
+#
+# cfg_box = {
+#     "heldout_mode": ("from_points" if heldout_mode.startswith("Held") else "from_users_file"),
+#     "presence_threshold_s": int(presence_threshold_s),
+#     "test_days_frac": float(test_days_frac),
+#     "heldout_top_p": float(top_p),
+#     "random_seed": int(seed),
+#     "k_eval": int(k_eval),
+#     "stability_k": int(k_stab),
+#     "hour_inspected": int(hour_to_plot),
+#     "map_top_k": int(k_map),
+#     "show_boundary": bool(show_boundary),
+# }
+# with st.expander("Run configuration (snapshot) — reproducibility"):
+#     st.json(cfg_box)
+#     st.download_button(
+#         "Download config snapshot (JSON)",
+#         data=json.dumps(cfg_box, indent=2).encode("utf-8"),
+#         file_name="evaluation_run_config.json",
+#         mime="application/json"
+#     )
+#     st.code(
+#         "eval:\n"
+#         f"  heldout_mode: {cfg_box['heldout_mode']}\n"
+#         f"  presence_threshold_s: {cfg_box['presence_threshold_s']}\n"
+#         f"  test_days_frac: {cfg_box['test_days_frac']}\n"
+#         f"  heldout_top_p: {cfg_box['heldout_top_p']}\n"
+#         f"  random_seed: {cfg_box['random_seed']}\n"
+#         f"  k: {cfg_box['k_eval']}\n"
+#         f"  stability_k: {cfg_box['stability_k']}\n",
+#         language="yaml",
+#     )
+#
+# st.caption("Temporal stability (held-out only): mean Jaccard of top-k across consecutive test days. Higher is better.")
 
 
 # =========================
 # TABLE + PROFILES
 # =========================
-st.subheader("Per-hour metrics")
-st.dataframe(
-    per_hour[["hour","P@k","R@k","F1@k","AP","Jaccard_stability","k_eval","|R_h|","candidates","max_recall_if_k"]],
-    use_container_width=True
-)
+# st.subheader("Per-hour metrics")
+# st.dataframe(
+#     per_hour[["hour","P@k","R@k","F1@k","AP","Jaccard_stability","k_eval","|R_h|","candidates","max_recall_if_k"]],
+#     use_container_width=True
+# )
 
-st.subheader("Profiles by hour")
-prof = per_hour.melt(id_vars="hour", value_vars=["P@k","R@k","F1@k","AP"], var_name="metric", value_name="value")
-chart = alt.Chart(prof).mark_line(point=False).encode(
-    x=alt.X("hour:O", title="hour (UTC)"),
-    y=alt.Y("value:Q"),
-    color="metric:N"
-).properties(height=220, width="container")
-st.altair_chart(chart, use_container_width=True)
+# st.subheader("Profiles by hour")
+# prof = per_hour.melt(id_vars="hour", value_vars=["P@k","R@k","F1@k","AP"], var_name="metric", value_name="value")
+# chart = alt.Chart(prof).mark_line(point=False).encode(
+#     x=alt.X("hour:O", title="hour (UTC)"),
+#     y=alt.Y("value:Q"),
+#     color="metric:N"
+# ).properties(height=220, width="container")
+# st.altair_chart(chart, use_container_width=True)
 
 
 # =========================
@@ -523,45 +530,45 @@ st.caption("Colours: **orange** = top-k predictions (candidates), **blue** = hel
 # =========================
 # DOWNLOADS
 # =========================
-c1, c2 = st.columns(2)
-with c1:
-    st.download_button(
-        "Download per-hour CSV",
-        data=per_hour.to_csv(index=False).encode("utf-8"),
-        file_name="08_eval_per_hour.csv",
-        mime="text/csv"
-    )
-with c2:
-    summary = pd.DataFrame([{
-        "hours_evaluated": int(per_hour["hour"].nunique()),
-        "P@k_mean": float(per_hour["P@k"].mean()),
-        "R@k_mean": float(per_hour["R@k"].mean()),
-        "F1@k_mean": float(per_hour["F1@k"].mean()),
-        "MAP": MAP,
-        "mean_Jaccard_stability": float(per_hour["Jaccard_stability"].dropna().mean()) if "Jaccard_stability" in per_hour else np.nan,
-        "heldout_mode": ("from_points" if heldout_mode.startswith("Held") else "from_users_file"),
-        "heldout_top_p": top_p,
-        "test_days_frac": test_days_frac,
-        "presence_threshold_s": presence_threshold_s,
-        "k_eval": k_eval,
-        "stability_k": k_stab,
-    }])
-    st.download_button(
-        "Download summary CSV",
-        data=summary.to_csv(index=False).encode("utf-8"),
-        file_name="08_eval_summary.csv",
-        mime="text/csv"
-    )
+# c1, c2 = st.columns(2)
+# with c1:
+#     st.download_button(
+#         "Download per-hour CSV",
+#         data=per_hour.to_csv(index=False).encode("utf-8"),
+#         file_name="08_eval_per_hour.csv",
+#         mime="text/csv"
+#     )
+# with c2:
+#     summary = pd.DataFrame([{
+#         "hours_evaluated": int(per_hour["hour"].nunique()),
+#         "P@k_mean": float(per_hour["P@k"].mean()),
+#         "R@k_mean": float(per_hour["R@k"].mean()),
+#         "F1@k_mean": float(per_hour["F1@k"].mean()),
+#         "MAP": MAP,
+#         "mean_Jaccard_stability": float(per_hour["Jaccard_stability"].dropna().mean()) if "Jaccard_stability" in per_hour else np.nan,
+#         "heldout_mode": ("from_points" if heldout_mode.startswith("Held") else "from_users_file"),
+#         "heldout_top_p": top_p,
+#         "test_days_frac": test_days_frac,
+#         "presence_threshold_s": presence_threshold_s,
+#         "k_eval": k_eval,
+#         "stability_k": k_stab,
+#     }])
+#     st.download_button(
+#         "Download summary CSV",
+#         data=summary.to_csv(index=False).encode("utf-8"),
+#         file_name="08_eval_summary.csv",
+#         mime="text/csv"
+#     )
 
 # =========================
 # FOOTNOTES
 # =========================
-with st.expander("How to read these metrics (short)"):
-    st.markdown("""
-- **P@k** — among the first *k* recommendations, the fraction that are truly relevant.
-- **R@k** — among all hold-out hotspots (\\(R_h\\)), the fraction captured in the top-k.
-- **F1@k** — harmonic mean of Precision@k and Recall@k.
-- **AP / MAP** — Average Precision per hour and the mean across hours; ranking order matters.
-- **Jaccard stability** — similarity of top-k sets across consecutive test days (temporal consistency).
-- **max_recall_if_k** — theoretical upper bound on recall when *k < |R_h|*.
-""")
+# with st.expander("How to read these metrics (short)"):
+#     st.markdown("""
+# - **P@k** — among the first *k* recommendations, the fraction that are truly relevant.
+# - **R@k** — among all hold-out hotspots (\\(R_h\\)), the fraction captured in the top-k.
+# - **F1@k** — harmonic mean of Precision@k and Recall@k.
+# - **AP / MAP** — Average Precision per hour and the mean across hours; ranking order matters.
+# - **Jaccard stability** — similarity of top-k sets across consecutive test days (temporal consistency).
+# - **max_recall_if_k** — theoretical upper bound on recall when *k < |R_h|*.
+# """)
